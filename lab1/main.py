@@ -20,7 +20,7 @@ def preprocess_logistic(data):
     return data
 
 
-def preprocess_bayes(data):
+def preprocess_bayesian(data):
     data = data.copy()
     data['price_range'].replace([0, 1, 2, 3], [0, 0, 1, 1], True)
     data['battery_power'] = pandas.cut(data['battery_power'], 10, labels=False)
@@ -57,7 +57,8 @@ def split(data, train, valid, test):
 
 
 def calc_error_rate(model, xs, ys):
-    return sum([y != model.predict(x) for x, y in zip(xs, ys)]) / len(xs)
+    predicted_ys = model.predict(xs)
+    return sum([y != predicted_y for y, predicted_y in zip(ys, predicted_ys)]) / len(xs)
 
 
 def run(preprocessor, model_class, data):
@@ -91,15 +92,15 @@ class LogisticRegression:
                 break
             self.ws = [w + eta * dw for w, dw in zip(self.ws, dws)]
 
-    def predict(self, x):
-        return int(self._calc_post_prob(x) > 0.5)
+    def predict(self, xs):
+        return [int(self._calc_post_prob(x) > 0.5) for x in xs]
 
     def _calc_post_prob(self, x):
         a = sum([w * attr for w, attr in zip(self.ws, [1.0, *x])])
         return 1 / (1 + math.exp(-a))
 
 
-class NaiveBayes:
+class NaiveBayesianClassifier:
     def __init__(self):
         self.tables = [[], []]
         self.ns = [0, 0]
@@ -116,14 +117,17 @@ class NaiveBayes:
                     row.setdefault(attr, 0)
                     row[attr] += 1
 
-    def predict(self, x):
-        attr_num = len(x)
-        f = [0.0, 0.0]
-        for c in [0, 1]:
-            f[c] = (self.ns[c] / self.total) * \
-                   functools.reduce(lambda v, e: v * e,
-                                    [self.tables[c][i].get(x[i], 0) / self.ns[c] for i in range(attr_num)])
-        return f.index(max(f))
+    def predict(self, xs):
+        attr_num = len(xs[0])
+        ys = []
+        for x in xs:
+            f = [0.0, 0.0]
+            for c in [0, 1]:
+                f[c] = (self.ns[c] / self.total) * \
+                       functools.reduce(lambda v, e: v * e,
+                                        [self.tables[c][i].get(x[i], 0) / self.ns[c] for i in range(attr_num)])
+            ys.append(f.index(max(f)))
+        return ys
 
 
 class SVM:
@@ -133,15 +137,15 @@ class SVM:
     def fit(self, xs, ys):
         self.svc.fit(xs, ys)
 
-    def predict(self, x):
-        return self.svc.predict([x])[0]
+    def predict(self, xs):
+        return self.svc.predict(xs)
 
 
 def main():
     data = pandas.read_csv('train.csv')
 
     run(preprocess_logistic, LogisticRegression, data)
-    run(preprocess_bayes, NaiveBayes, data)
+    run(preprocess_bayesian, NaiveBayesianClassifier, data)
     run(preprocess_svm, SVM, data)
 
 
