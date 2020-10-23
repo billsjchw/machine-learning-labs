@@ -58,7 +58,7 @@ def score(model, xs, ys):
     return sum([y != predicted_y for y, predicted_y in zip(ys, predicted_ys)]) / len(xs)
 
 
-def test(preprocessor, model_class, data):
+def run(preprocessor, model_class, data):
     data = preprocessor(data)
     data_train, data_valid, data_test = split(data, 8, 1, 1)
     xs_train, ys_train = get_xs_ys(data_train)
@@ -147,9 +147,9 @@ class SVM:
 def main():
     data = pandas.read_csv('train.csv')
 
-    test(preprocess_logistic, LogisticRegression, data)
-    test(preprocess_bayesian, NaiveBayesianClassifier, data)
-    test(preprocess_svm, SVM, data)
+    run(preprocess_logistic, LogisticRegression, data)
+    run(preprocess_bayesian, NaiveBayesianClassifier, data)
+    run(preprocess_svm, SVM, data)
 
 
 if __name__ == '__main__':
