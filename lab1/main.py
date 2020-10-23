@@ -1,6 +1,7 @@
 import math
 import pandas
 import functools
+import time
 from sklearn.svm import SVC
 
 
@@ -57,7 +58,7 @@ def score(model, xs, ys):
     return sum([y != predicted_y for y, predicted_y in zip(ys, predicted_ys)]) / len(xs)
 
 
-def run(preprocessor, model_class, data):
+def test(preprocessor, model_class, data):
     data = preprocessor(data)
     data_train, data_valid, data_test = split(data, 8, 1, 1)
     xs_train, ys_train = get_xs_ys(data_train)
@@ -65,9 +66,15 @@ def run(preprocessor, model_class, data):
     xs_test, ys_test = get_xs_ys(data_test)
 
     model = model_class()
+    time_start = time.time()
     model.fit(xs_train, ys_train)
+    time_finish = time.time()
 
-    print(score(model, xs_test, ys_test))
+    score_test = score(model, xs_test, ys_test)
+    score_train = score(model, xs_train, ys_train)
+    time_cost = time_finish - time_start
+
+    print("{:8.2%} {:8.2%} {:8.2f}".format(score_test, score_train, time_cost))
 
 
 class LogisticRegression:
@@ -140,9 +147,9 @@ class SVM:
 def main():
     data = pandas.read_csv('train.csv')
 
-    run(preprocess_logistic, LogisticRegression, data)
-    run(preprocess_bayesian, NaiveBayesianClassifier, data)
-    run(preprocess_svm, SVM, data)
+    test(preprocess_logistic, LogisticRegression, data)
+    test(preprocess_bayesian, NaiveBayesianClassifier, data)
+    test(preprocess_svm, SVM, data)
 
 
 if __name__ == '__main__':
