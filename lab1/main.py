@@ -37,10 +37,6 @@ def preprocess_bayesian(data):
 def preprocess_svm(data):
     data = data.copy()
     data['price_range'].replace([0, 1, 2, 3], [0, 0, 1, 1], True)
-    for col_name in data.columns:
-        if col_name != 'price_range':
-            s = data[col_name].max()
-            data[col_name] = data[col_name].apply(lambda x: x / s)
     return data
 
 
@@ -56,7 +52,7 @@ def split(data, train, valid, test):
     return data_train, data_valid, data_test
 
 
-def calc_error_rate(model, xs, ys):
+def score(model, xs, ys):
     predicted_ys = model.predict(xs)
     return sum([y != predicted_y for y, predicted_y in zip(ys, predicted_ys)]) / len(xs)
 
@@ -71,7 +67,7 @@ def run(preprocessor, model_class, data):
     model = model_class()
     model.fit(xs_train, ys_train)
 
-    print(calc_error_rate(model, xs_test, ys_test))
+    print(score(model, xs_test, ys_test))
 
 
 class LogisticRegression:
@@ -123,9 +119,9 @@ class NaiveBayesianClassifier:
         for x in xs:
             f = [0.0, 0.0]
             for c in [0, 1]:
-                f[c] = (self.ns[c] / self.total) * \
-                       functools.reduce(lambda v, e: v * e,
-                                        [self.tables[c][i].get(x[i], 0) / self.ns[c] for i in range(attr_num)])
+                p = self.ns[c] / self.total
+                ps = [self.tables[c][i].get(x[i], 0) / self.ns[c] for i in range(attr_num)]
+                f[c] = functools.reduce(lambda v, e: v * e, [p, *ps])
             ys.append(f.index(max(f)))
         return ys
 
