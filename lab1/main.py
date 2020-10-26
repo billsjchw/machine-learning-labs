@@ -2,6 +2,8 @@ import math
 import pandas
 import functools
 import time
+import seaborn
+from matplotlib import pyplot
 from sklearn.svm import SVC
 
 
@@ -55,7 +57,7 @@ def split(data, train, valid, test):
 
 def score(model, xs, ys):
     predicted_ys = model.predict(xs)
-    return sum([y != predicted_y for y, predicted_y in zip(ys, predicted_ys)]) / len(xs)
+    return sum([y == predicted_y for y, predicted_y in zip(ys, predicted_ys)]) / len(xs)
 
 
 def run(preprocessor, model_class, data):
@@ -72,9 +74,53 @@ def run(preprocessor, model_class, data):
 
     score_test = score(model, xs_test, ys_test)
     score_train = score(model, xs_train, ys_train)
-    time_cost = time_finish - time_start
+    elapsed_time = time_finish - time_start
 
-    print("{:8.2%} {:8.2%} {:8.2f}".format(score_test, score_train, time_cost))
+    return score_test, score_train, elapsed_time
+
+
+def compare(n):
+    names = ['logistic', 'bayesian', 'svm']
+
+    preprocessors = {
+        'logistic': preprocess_logistic,
+        'bayesian': preprocess_bayesian,
+        'svm': preprocess_svm
+    }
+    model_classes = {
+        'logistic': LogisticRegression,
+        'bayesian': NaiveBayesianClassifier,
+        'svm': SVM
+    }
+
+    avg_scores_test = {'logistic': 0.0, 'bayesian': 0.0, 'svm': 0.0}
+    avg_scores_train = {'logistic': 0.0, 'bayesian': 0.0, 'svm': 0.0}
+    avg_elapsed_times = {'logistic': 0.0, 'bayesian': 0.0, 'svm': 0.0}
+
+    data = pandas.read_csv('train.csv')
+
+    for _ in range(n):
+        data = data.sample(frac=1)
+        for name in names:
+            score_test, score_train, elapsed_time = run(preprocessors[name], model_classes[name], data)
+            avg_scores_test[name] += score_test / n
+            avg_scores_train[name] += score_train / n
+            avg_elapsed_times[name] += elapsed_time / n
+
+    print('Method    Accuracy (Test)  Accuracy (Training)  Time (sec)')
+    fmt_str = '{:<8}  {:>15.2%}  {:>19.2%}  {:>10.3f}'
+    for name in names:
+        print(fmt_str.format(name, avg_scores_test[name], avg_scores_train[name], avg_elapsed_times[name]))
+
+    pyplot.figure()
+    seaborn.barplot(
+        names * 2,
+        [avg_scores_test[name] for name in names] + [avg_scores_train[name] for name in names],
+        ['Test'] * 3 + ['Training'] * 3
+    )
+    pyplot.xlabel('Method')
+    pyplot.ylabel('Accuracy')
+    pyplot.show()
 
 
 class LogisticRegression:
@@ -83,14 +129,14 @@ class LogisticRegression:
 
     def fit(self, xs, ys):
         eta = 0.001
-        conv_bound = 0.003
+        conv_bound = 0.005
         attr_num = len(xs[0]) + 1
         self.ws = [0.0] * attr_num
         while True:
             dws = [0.0] * attr_num
             for x, y in zip(xs, ys):
-                prob = self._calc_post_prob(x)
-                dws = [dw + (y - prob) * attr for dw, attr in zip(dws, [1.0, *x])]
+                post_prob = self._calc_post_prob(x)
+                dws = [dw + (y - post_prob) * attr for dw, attr in zip(dws, [1.0, *x])]
             if all([abs(eta * dw) < conv_bound for dw in dws]):
                 break
             self.ws = [w + eta * dw for w, dw in zip(self.ws, dws)]
@@ -122,13 +168,14 @@ class NaiveBayesianClassifier:
 
     def predict(self, xs):
         attr_num = len(xs[0])
+        total = sum(self.ns)
+        prior_probs = [self.ns[c] / total for c in [0, 1]]
         ys = []
         for x in xs:
             f = [0.0, 0.0]
             for c in [0, 1]:
-                p = self.ns[c] / self.total
-                ps = [self.tables[c][i].get(x[i], 0) / self.ns[c] for i in range(attr_num)]
-                f[c] = functools.reduce(lambda v, e: v * e, [p, *ps])
+                likelihoods = [self.tables[c][i].get(x[i], 0) / self.ns[c] for i in range(attr_num)]
+                f[c] = functools.reduce(lambda v, e: v * e, [prior_probs[c], *likelihoods])
             ys.append(f.index(max(f)))
         return ys
 
@@ -145,11 +192,7 @@ class SVM:
 
 
 def main():
-    data = pandas.read_csv('train.csv')
-
-    run(preprocess_logistic, LogisticRegression, data)
-    run(preprocess_bayesian, NaiveBayesianClassifier, data)
-    run(preprocess_svm, SVM, data)
+    compare(1)
 
 
 if __name__ == '__main__':
