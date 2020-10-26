@@ -44,9 +44,9 @@ def split(data, train, valid, test):
     size_train = int(size * train / (train + valid + test))
     size_valid = int(size * valid / (train + valid + test))
 
-    data_train = data[0:size_train]
-    data_valid = data[size_train:size_train + size_valid]
-    data_test = data[size_train + size_valid:size]
+    data_train = data[0:size_train].copy()
+    data_valid = data[size_train:size_train + size_valid].copy()
+    data_test = data[size_train + size_valid:size].copy()
 
     return data_train, data_valid, data_test
 
