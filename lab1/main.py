@@ -26,7 +26,6 @@ def preprocess_bayesian(data):
     data = data.copy()
     data['battery_power'] = pandas.cut(data['battery_power'], 10, labels=False)
     data['clock_speed'] = pandas.cut(data['clock_speed'], 10, labels=False)
-    data['fc'] = pandas.cut(data['fc'], 10, labels=False)
     data['int_memory'] = pandas.cut(data['int_memory'], 10, labels=False)
     data['mobile_wt'] = pandas.cut(data['mobile_wt'], 10, labels=False)
     data['px_height'] = pandas.cut(data['px_height'], 10, labels=False)
@@ -191,7 +190,7 @@ class SVM:
 
 
 def main():
-    compare(1)
+    compare(3)
 
 
 if __name__ == '__main__':
