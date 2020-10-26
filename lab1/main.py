@@ -15,7 +15,6 @@ def get_xs_ys(data):
 
 def preprocess_logistic(data):
     data = data.copy()
-    data['price_range'].replace([0, 1, 2, 3], [0, 0, 1, 1], True)
     for col_name in data.columns:
         if col_name != 'price_range':
             s = data[col_name].max()
@@ -25,7 +24,6 @@ def preprocess_logistic(data):
 
 def preprocess_bayesian(data):
     data = data.copy()
-    data['price_range'].replace([0, 1, 2, 3], [0, 0, 1, 1], True)
     data['battery_power'] = pandas.cut(data['battery_power'], 10, labels=False)
     data['clock_speed'] = pandas.cut(data['clock_speed'], 10, labels=False)
     data['fc'] = pandas.cut(data['fc'], 10, labels=False)
@@ -39,7 +37,6 @@ def preprocess_bayesian(data):
 
 def preprocess_svm(data):
     data = data.copy()
-    data['price_range'].replace([0, 1, 2, 3], [0, 0, 1, 1], True)
     return data
 
 
@@ -98,6 +95,8 @@ def compare(n):
     avg_elapsed_times = {'logistic': 0.0, 'bayesian': 0.0, 'svm': 0.0}
 
     data = pandas.read_csv('train.csv')
+
+    data['price_range'].replace([0, 1, 2, 3], [0, 0, 1, 1], True)
 
     for _ in range(n):
         data = data.sample(frac=1)
