@@ -151,11 +151,9 @@ class NaiveBayesianClassifier:
     def __init__(self):
         self.tables = [[], []]
         self.ns = [0, 0]
-        self.total = 0
 
     def fit(self, xs, ys):
         attr_num = len(xs[0])
-        self.total = len(xs)
         for c in [0, 1]:
             self.ns[c] = ys.count(c)
             self.tables[c] = [dict() for _ in range(attr_num)]
