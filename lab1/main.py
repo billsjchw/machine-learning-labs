@@ -126,8 +126,8 @@ class LogisticRegression:
         self.ws = []
 
     def fit(self, xs, ys):
-        eta = 0.001
-        conv_bound = 0.005
+        eta = 0.005
+        conv_bound = 0.01
         attr_num = len(xs[0]) + 1
         self.ws = [0.0] * attr_num
         while True:
@@ -135,6 +135,8 @@ class LogisticRegression:
             for x, y in zip(xs, ys):
                 post_prob = self._calc_post_prob(x)
                 dws = [dw + (y - post_prob) * attr for dw, attr in zip(dws, [1.0, *x])]
+            # print(self.ws)
+            # print(dws)
             if all([abs(eta * dw) < conv_bound for dw in dws]):
                 break
             self.ws = [w + eta * dw for w, dw in zip(self.ws, dws)]
@@ -188,7 +190,7 @@ class SVM:
 
 
 def main():
-    compare(3)
+    compare(5)
 
 
 if __name__ == '__main__':
