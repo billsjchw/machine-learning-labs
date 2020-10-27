@@ -159,10 +159,11 @@ class NaiveBayesianClassifier:
         for c in [0, 1]:
             self.ns[c] = ys.count(c)
             self.tables[c] = [dict() for _ in range(attr_num)]
-            for x in [x for x, y in zip(xs, ys) if y == c]:
-                for attr, row in zip(x, self.tables[c]):
-                    row.setdefault(attr, 0)
-                    row[attr] += 1
+            for x, y in zip(xs, ys):
+                if y == c:
+                    for attr, row in zip(x, self.tables[c]):
+                        row.setdefault(attr, 0)
+                        row[attr] += 1
 
     def predict(self, xs):
         attr_num = len(xs[0])
