@@ -135,8 +135,6 @@ class LogisticRegression:
             for x, y in zip(xs, ys):
                 post_prob = self._calc_post_prob(x)
                 dws = [dw + (y - post_prob) * attr for dw, attr in zip(dws, [1.0, *x])]
-            # print(self.ws)
-            # print(dws)
             if all([abs(eta * dw) < conv_bound for dw in dws]):
                 break
             self.ws = [w + eta * dw for w, dw in zip(self.ws, dws)]
