@@ -435,24 +435,49 @@ class Chatbot:
         disc_optimizer = optim.RMSprop(disc_params, lr=disc_lr)
         auto_enc_lr_scheduler = optim.lr_scheduler.StepLR(auto_enc_optimizer, step_size=10, gamma=0.6)
 
-        def train_auto_encoder(ctxs, ctx_lens, utt_lenss, floorss, resps, resp_lens):
-            self.dialog_wae.ctx_encoder.train()
-            self.dialog_wae.training_decoder.train()
-            auto_enc_optimizer.zero_grad()
-
-            cs = self.dialog_wae.ctx_encoder(ctxs, ctx_lens, utt_lenss, floorss)
-            xs = self.dialog_wae.utt_encoder(resps, resp_lens)
-            epsilons = self.dialog_wae.post_net(torch.cat([xs, cs], 1))
-            zs = self.dialog_wae.post_generator(epsilons)
-            dec_resps = self.dialog_wae.training_decoder(zs, cs, resps[:, :-1])
-
+        def calc_auto_enc_loss(cs, xs, resps):
+            post_epsilons = self.dialog_wae.post_net(torch.cat([xs, cs], 1))
+            post_zs = self.dialog_wae.post_generator(post_epsilons)
+            dec_resps = self.dialog_wae.training_decoder(post_zs, cs, resps[:, :-1])
             mask = resps[:, 1:].contiguous().view(-1).gt(0)
             cross_ent_input = dec_resps.view(-1, self.dialog_wae.vocab_size) \
                 .masked_select(mask.unsqueeze(1).expand(mask.size()[0], self.dialog_wae.vocab_size)) \
                 .view(-1, self.dialog_wae.vocab_size)
             cross_ent_target = resps[:, 1:].contiguous().view(-1).masked_select(mask)
-            loss = nn.CrossEntropyLoss()(cross_ent_input, cross_ent_target)
-            loss.backward()
+            return nn.CrossEntropyLoss()(cross_ent_input, cross_ent_target)
+
+        def calc_post_disc_err(cs, xs):
+            post_epsilons = self.dialog_wae.post_net(torch.cat([xs, cs], 1))
+            post_zs = self.dialog_wae.post_generator(post_epsilons)
+            return torch.mean(self.dialog_wae.discriminator(post_zs, cs))
+
+        def calc_prior_disc_err(cs):
+            prior_epsilons = self.dialog_wae.prior_net(cs)
+            prior_zs = self.dialog_wae.prior_generator(prior_epsilons)
+            return torch.mean(self.dialog_wae.discriminator(prior_zs, cs))
+
+        def calc_gradient_penalty(cs, xs):
+            post_epsilons = self.dialog_wae.post_net(torch.cat([xs, cs], 1))
+            post_zs = self.dialog_wae.post_generator(post_epsilons)
+            prior_epsilons = self.dialog_wae.prior_net(cs)
+            prior_zs = self.dialog_wae.prior_generator(prior_epsilons)
+            alphas = torch.rand(batch_size, 1, device=DEVICE).expand(prior_zs.size())
+            interps = alphas * prior_zs.detach() + (1 - alphas) * post_zs.detach()
+            interps.requires_grad = True
+            interp_disc_errs = torch.mean(self.dialog_wae.discriminator(interps, cs))
+            gradients = autograd.grad(interp_disc_errs, interps,
+                                      torch.ones(interp_disc_errs.size(), device=DEVICE), True, True)[0]
+            return torch.mean((gradients.view(gradients.size()[0], -1).norm(2, 1) - 1) ** 2) * lambda_gp
+
+        def train_auto_encoder(ctxs, ctx_lens, utt_lenss, floorss, resps, resp_lens):
+            self.dialog_wae.train()
+            auto_enc_optimizer.zero_grad()
+
+            cs = self.dialog_wae.ctx_encoder(ctxs, ctx_lens, utt_lenss, floorss)
+            xs = self.dialog_wae.utt_encoder(resps, resp_lens)
+
+            auto_enc_loss = calc_auto_enc_loss(cs, xs, resps)
+            auto_enc_loss.backward()
 
             clip_params = [
                 *self.dialog_wae.ctx_encoder.parameters(),
@@ -461,81 +486,61 @@ class Chatbot:
             nnutils.clip_grad_norm_(clip_params, max_norm)
             auto_enc_optimizer.step()
 
-            return loss.item()
+            return auto_enc_loss.item()
 
         def train_generator(ctxs, ctx_lens, utt_lenss, floorss, resps, resp_lens):
+            self.dialog_wae.train()
             self.dialog_wae.ctx_encoder.eval()
             gen_optimizer.zero_grad()
-            self.dialog_wae.discriminator.requires_grad_(False)
 
-            cs = self.dialog_wae.ctx_encoder(ctxs, ctx_lens, utt_lenss, floorss)
-            xs = self.dialog_wae.utt_encoder(resps, resp_lens)
-            post_epsilons = self.dialog_wae.post_net(torch.cat([xs.detach(), cs.detach()], 1))
-            post_zs = self.dialog_wae.post_generator(post_epsilons)
-            post_disc_err = torch.mean(self.dialog_wae.discriminator(post_zs, cs.detach()))
+            cs = self.dialog_wae.ctx_encoder(ctxs, ctx_lens, utt_lenss, floorss).detach()
+            xs = self.dialog_wae.utt_encoder(resps, resp_lens).detach()
+
+            post_disc_err = calc_post_disc_err(cs, xs)
             post_disc_err.backward(torch.tensor(-1.).to(DEVICE))
 
-            prior_epsilons = self.dialog_wae.prior_net(cs.detach())
-            prior_zs = self.dialog_wae.prior_generator(prior_epsilons)
-            prior_disc_err = torch.mean(self.dialog_wae.discriminator(prior_zs, cs.detach()))
+            prior_disc_err = calc_prior_disc_err(cs)
             prior_disc_err.backward(torch.tensor(1.).to(DEVICE))
 
             gen_optimizer.step()
 
-            self.dialog_wae.discriminator.requires_grad_(True)
-
-            return (prior_disc_err - post_disc_err).item()
+            gen_loss = prior_disc_err - post_disc_err
+            return gen_loss.item()
 
         def train_discriminator(ctxs, ctx_lens, utt_lenss, floorss, resps, resp_lens):
+            self.dialog_wae.train()
             self.dialog_wae.ctx_encoder.eval()
-            self.dialog_wae.discriminator.train()
             disc_optimizer.zero_grad()
 
-            cs = self.dialog_wae.ctx_encoder(ctxs, ctx_lens, utt_lenss, floorss)
-            xs = self.dialog_wae.utt_encoder(resps, resp_lens)
-            post_epsilons = self.dialog_wae.post_net(torch.cat([xs, cs], 1))
-            post_zs = self.dialog_wae.post_generator(post_epsilons)
-            post_disc_err = torch.mean(self.dialog_wae.discriminator(post_zs.detach(), cs.detach()))
+            cs = self.dialog_wae.ctx_encoder(ctxs, ctx_lens, utt_lenss, floorss).detach()
+            xs = self.dialog_wae.utt_encoder(resps, resp_lens).detach()
+
+            post_disc_err = calc_post_disc_err(cs, xs)
             post_disc_err.backward(torch.tensor(1.).to(DEVICE))
 
-            prior_epsilons = self.dialog_wae.prior_net(cs)
-            prior_zs = self.dialog_wae.prior_generator(prior_epsilons)
-            prior_disc_err = torch.mean(self.dialog_wae.discriminator(prior_zs.detach(), cs.detach()))
+            prior_disc_err = calc_prior_disc_err(cs)
             prior_disc_err.backward(torch.tensor(-1.).to(DEVICE))
 
-            alphas = torch.rand(batch_size, 1, device=DEVICE).expand(prior_zs.size())
-            interps = alphas * prior_zs.detach() + (1 - alphas) * post_zs.detach()
-            interps.requires_grad = True
-            interp_disc_errs = torch.mean(self.dialog_wae.discriminator(interps, cs.detach()))
-            gradients = autograd.grad(interp_disc_errs, interps,
-                                      torch.ones((interp_disc_errs.size()), device=DEVICE), True, True)[0]
-            gradient_penalty = torch.mean((gradients.view(gradients.size()[0], -1).norm(2, 1) - 1) ** 2) * lambda_gp
+            gradient_penalty = calc_gradient_penalty(cs, xs)
             gradient_penalty.backward()
 
             disc_optimizer.step()
-            return (post_disc_err - prior_disc_err + gradient_penalty).item()
 
-        def eval_loss(ctxs, ctx_lens, utt_lenss, floorss, resps, resp_lens):
+            disc_loss = post_disc_err - prior_disc_err + gradient_penalty
+            return disc_loss.item()
+
+        def calc_loss(ctxs, ctx_lens, utt_lenss, floorss, resps, resp_lens):
             self.dialog_wae.eval()
 
             cs = self.dialog_wae.ctx_encoder(ctxs, ctx_lens, utt_lenss, floorss)
             xs = self.dialog_wae.utt_encoder(resps, resp_lens)
-            post_epsilons = self.dialog_wae.post_net(torch.cat([xs, cs], 1))
-            post_zs = self.dialog_wae.post_generator(post_epsilons)
-            prior_epsilons = self.dialog_wae.prior_net(cs)
-            prior_zs = self.dialog_wae.prior_generator(prior_epsilons)
-            post_disc_err = torch.mean(self.dialog_wae.discriminator(post_zs, cs))
-            prior_disc_err = torch.mean(self.dialog_wae.discriminator(prior_zs, cs))
+
+            post_disc_err = calc_post_disc_err(cs, xs)
+            prior_disc_err = calc_prior_disc_err(cs)
             disc_loss = post_disc_err - prior_disc_err
             gen_loss = -disc_loss
 
-            dec_resps = self.dialog_wae.training_decoder(post_zs, cs, resps[:, :-1])
-            mask = resps[:, 1:].contiguous().view(-1).gt(0)
-            cross_ent_input = dec_resps.view(-1, self.dialog_wae.vocab_size) \
-                .masked_select(mask.unsqueeze(1).expand(mask.size()[0], self.dialog_wae.vocab_size)) \
-                .view(-1, self.dialog_wae.vocab_size)
-            cross_ent_target = resps[:, 1:].contiguous().view(-1).masked_select(mask)
-            auto_enc_loss = nn.CrossEntropyLoss()(cross_ent_input, cross_ent_target)
+            auto_enc_loss = calc_auto_enc_loss(cs, xs, resps)
 
             return auto_enc_loss.item(), gen_loss.item(), disc_loss.item()
 
@@ -555,7 +560,7 @@ class Chatbot:
 
         def validate(epoch_no):
             data_loader = data.DataLoader(validation_dataset, batch_size, True, num_workers=1, drop_last=True)
-            loss_tuples = [eval_loss(*tuple(tensor.to(DEVICE) for tensor in batch)) for batch in data_loader]
+            loss_tuples = [calc_loss(*tuple(tensor.to(DEVICE) for tensor in batch)) for batch in data_loader]
             avg_loss_tuple = [
                 np.mean([loss_tuple[i] for loss_tuple in loss_tuples])
                 for i in range(3)
